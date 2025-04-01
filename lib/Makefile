@@ -2,10 +2,9 @@ OUTDIR=../bin/Debug/net8.0
 OBJDIR=obj
 SRCDIR=src
 
-# Need G++13 for std::format
-CC=g++-13
+CC=g++
 RM=rm
-LINKER=g++-13
+LINKER=g++
 TARGET=mylib
 
 SRCS=$(wildcard $(SRCDIR)/*.cpp)
@@ -20,7 +19,7 @@ CFLAGS=\
 	-O0\
 	-Wall\
 	-g\
-	-std=c++20\
+	-std=c++17\
 	-fPIC\
 	-I/usr/local/cuda/include\
 

@@ -1,99 +1,69 @@
 #include <cstdio>
-#include <format>
-#include <memory>
-#include <stdexcept>
 #include <vector>
 #include <nvml.h>
-
 #include "core.h"
 
-#define CHECK(statement) \
-  do { \
-    auto result = (statement); \
-    if (result != NVML_SUCCESS) { \
-      throw std::runtime_error(std::format( \
-        "`{0}` failed with {1} at {2}:{3}", \
-        #statement, \
-        nvmlErrorString(result), \
-        __FILE__, \
-        __LINE__ \
-        ) \
-      ); \
-    } \
-  } while (0)
+const int Initial_Count = 10;
+const int MaxRetry = 10;
 
-const int MaxRetry_GetProcesses = 10;
+ErrorCallback error_callback = nullptr;
 
 class RAII_NVML {
-  public:
-    RAII_NVML() {
-      CHECK(nvmlInit_v2());
+ public:
+  RAII_NVML() {
+    CHECK(nvmlInit_v2());
+  }
+  ~RAII_NVML() {
+    auto result = nvmlShutdown();
+    if (result != NVML_SUCCESS) {
+      fprintf(
+        stderr,
+        "nvmlShutdown failed - %s\n",
+        nvmlErrorString(result)
+      );
     }
-    ~RAII_NVML() {
-      auto result = nvmlShutdown();
-      if (result != NVML_SUCCESS) {
-        fprintf(
-          stderr,
-          "nvmlShutdown failed - %s\n",
-          nvmlErrorString(result)
-        );
-      }
-    }
+  }
 };
 
 std::unique_ptr<nvmlProcessInfo_t[]> GetComputeProcesses(
   nvmlDevice_t device,
   unsigned int& count
 ) {
-  count = 0;
-  for (int i = 0; i < MaxRetry_GetProcesses; ++i) {
-    auto procs = std::make_unique<nvmlProcessInfo_t[]>(count);
-    auto result =
-      nvmlDeviceGetComputeRunningProcesses_v3(device, &count, procs.get());
-    if (result == NVML_SUCCESS) {
-      return procs;
-    }
-    if (result != NVML_ERROR_INSUFFICIENT_SIZE) {
-      fprintf(
-        stderr,
-        "nvmlDeviceGetComputeRunningProcesses_v3 failed - %s\n",
-        nvmlErrorString(result)
-      );
-      return nullptr;
-    }
-  }
-  fprintf(stderr, "GetComputeProcesses giving up\n");
-  return nullptr;
+  count = Initial_Count;
+  return GetItems<nvmlProcessInfo_t>(
+    [device](nvmlProcessInfo_t buf[], unsigned int& count) -> bool {
+      auto res = nvmlDeviceGetComputeRunningProcesses_v3(device, &count, buf);
+      if (res == NVML_ERROR_INSUFFICIENT_SIZE) {
+        return false;
+      }
+      CHECK(res);
+      return true;
+    },
+    count,
+    MaxRetry
+  );
 }
 
 std::unique_ptr<nvmlProcessInfo_t[]> GetGraphicsProcesses(
   nvmlDevice_t device,
   unsigned int& count
 ) {
-  count = 0;
-  for (int i = 0; i < MaxRetry_GetProcesses; ++i) {
-    auto procs = std::make_unique<nvmlProcessInfo_t[]>(count);
-    auto result =
-      nvmlDeviceGetGraphicsRunningProcesses_v3(device, &count, procs.get());
-    if (result == NVML_SUCCESS) {
-      return procs;
-    }
-    if (result != NVML_ERROR_INSUFFICIENT_SIZE) {
-      fprintf(
-        stderr,
-        "nvmlDeviceGetGraphicsRunningProcesses_v3 failed - %s\n",
-        nvmlErrorString(result)
-      );
-      return nullptr;
-    }
-  }
-  fprintf(stderr, "GetGraphicsProcesses giving up\n");
-  return nullptr;
+  count = Initial_Count;
+  return GetItems<nvmlProcessInfo_t>(
+    [device](nvmlProcessInfo_t buf[], unsigned int& count) -> bool {
+      auto res = nvmlDeviceGetGraphicsRunningProcesses_v3(device, &count, buf);
+      if (res == NVML_ERROR_INSUFFICIENT_SIZE) {
+        return false;
+      }
+      CHECK(res);
+      return true;
+    },
+    count,
+    MaxRetry
+  );
 }
 
-extern "C" {
-
-GpuProcessInfo* GetGpuProcesses(int* size) {
+GpuProcessInfo* GetGpuProcessesInternal(int* size) {
   RAII_NVML nvml;
 
   unsigned int device_count;
@@ -147,8 +117,24 @@ GpuProcessInfo* GetGpuProcesses(int* size) {
   return raw_buffer.release();
 }
 
-void FreeGpuProcesses(GpuProcessInfo* data) {
-  std::unique_ptr<GpuProcessInfo[]> buf(data);
-}
+extern "C" {
+  void RegisterErrorCallback(ErrorCallback callback) {
+    error_callback = callback;
+  }
 
+  GpuProcessInfo* GetGpuProcesses(int* size) {
+    try {
+      return GetGpuProcessesInternal(size);
+    }
+    catch (const std::exception& e) {
+      if (error_callback) {
+        error_callback(e.what());
+      }
+      return nullptr;
+    }
+  }
+
+  void FreeGpuProcesses(GpuProcessInfo* data) {
+    std::unique_ptr<GpuProcessInfo[]> buf(data);
+  }
 }
