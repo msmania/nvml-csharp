@@ -1,12 +1,10 @@
+#ifndef core_h_
+#define core_h_
+
 #include <functional>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
-
-#ifndef NVML_API_VERSION
-#define NVML_SUCCESS 0
-int nvmlErrorString(int a) {return a;}
-#endif // NVML_API_VERSION
 
 #define CHECK(statement) \
   do { \
@@ -61,3 +59,10 @@ extern "C" {
   EXPORT GpuProcessInfo* GetGpuProcesses(int*);
   EXPORT void FreeGpuProcesses(GpuProcessInfo*);
 }
+
+extern const int Initial_Count;
+extern const int MaxRetry;
+
+GpuProcessInfo* GetGpuProcessesInternal(int* size);
+
+#endif
